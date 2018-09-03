@@ -1,0 +1,24 @@
+[
+  {
+    "request":{
+      "url": "/some-mock/{id}",
+      "method": "GET"
+    },
+    "response": {
+      "body": {
+        "some-key": "{{.vars.id}}",
+        "with-sub": {
+          "ok": true,
+          "hdr": "{{.header.user-agent}}"
+        },
+        "list":[1,2,3]
+      },
+      "header": {
+        "some-value": "{{.query.search}}",
+        "trace-id": "$echo$"
+      },
+      "statusCode": 200,
+      "delay-ms": 0
+    }
+  }
+]
