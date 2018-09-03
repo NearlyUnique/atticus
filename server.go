@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"reflect"
 	"text/template"
 
 	"github.com/gorilla/mux"
@@ -38,9 +39,12 @@ type (
 	}
 	// TemplateData based on request data
 	TemplateData struct {
-		Header http.Header
 		Method string
 		URL    string
+		Vars   map[string]string
+		Header map[string]interface{}
+		Query  map[string]interface{}
+		Body   map[string]interface{}
 	}
 )
 
@@ -74,22 +78,20 @@ func (s *Server) Run() error {
 			Methods(c.Request.Method).
 			HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-				requestData := map[string]interface{}{
-					"method": r.Method,
-					"url":    r.URL.String(),
-					"query":  copyMap(map[string][]string(r.URL.Query())),
-					"vars":   vars(r),
-					"header": copyMap(map[string][]string(r.Header)),
-					// form?
+				data := TemplateData{
+					Method: r.Method,
+					URL:    r.URL.String(),
+					Query:  copyMap(map[string][]string(r.URL.Query())),
+					Vars:   vars(r),
+					Header: copyMap(map[string][]string(r.Header)),
 				}
 
 				if r.Body != nil && r.ContentLength > 0 {
 					buf, err := ioutil.ReadAll(r.Body)
 					if err == nil {
-						var jsonBody map[string]interface{}
-						err := json.Unmarshal(buf, &jsonBody)
+						err := json.Unmarshal(buf, &data.Body)
 						if err == nil {
-							requestData["body"] = jsonBody
+							log.Printf("Bad Template: %v", err)
 						}
 					}
 				}
@@ -102,7 +104,7 @@ func (s *Server) Run() error {
 					}
 
 					buf := &bytes.Buffer{}
-					err = t.Execute(buf, requestData)
+					err = t.Execute(buf, data)
 					if err != nil {
 						log.Printf("execute failed: %v", err)
 						break
@@ -112,17 +114,21 @@ func (s *Server) Run() error {
 
 				w.WriteHeader(code)
 				if body != nil {
-					t, err := template.New("test").Parse(string(body))
-					if err != nil {
-						log.Printf("parse failed: %v", err)
-					}
 
-					buf := &bytes.Buffer{}
-					err = t.Execute(buf, requestData)
-					if err != nil {
-						log.Printf("execute failed: %v", err)
-					}
-					w.Write(buf.Bytes())
+					// t, err := template.New("test").Parse(string(body))
+					// if err != nil {
+					// 	log.Printf("parse failed: %v", err)
+					// }
+
+					// buf := &bytes.Buffer{}
+					// err = t.Execute(buf, data)
+					// if err != nil {
+					// 	log.Printf("execute failed: %v", err)
+					// }
+
+					// data has the data for this request
+
+					// w.Write(buf.Bytes())
 				}
 			})
 	}
@@ -167,6 +173,7 @@ func ApplyTemplate(template interface{}, data TemplateData) ([]byte, error) {
 	case map[string]interface{}:
 		walkMap(t, mapWriter(result))
 	}
+	fmt.Printf("%v\n", reflect.TypeOf(template))
 	return json.Marshal(result)
 }
 

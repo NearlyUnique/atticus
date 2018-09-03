@@ -9,6 +9,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func Test_string_templates(t *testing.T) {
+	type blob map[string]interface{}
+	c := map[string]interface{}{
+		"key": "start {{.header.id}} end",
+	}
+	data := atticus.TemplateData{
+		Header: blob{
+			"id": "from-header-id",
+		},
+	}
+	var actual struct{ Key string }
+
+	jsonBody, err := atticus.ApplyTemplate(c, data)
+
+	assert.NoError(t, err)
+
+	err = json.Unmarshal(jsonBody, &actual)
+	require.NoError(t, err)
+
+	assert.Equal(t, "start from-header-id end", actual.Key)
+}
+
 func Test_simple_json_structure_can_be_rendered(t *testing.T) {
 	c := createRequestBody(t, `{
 		"a-string":"a-value",
