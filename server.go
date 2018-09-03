@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"reflect"
 	"text/template"
 
 	"github.com/gorilla/mux"
@@ -166,33 +165,52 @@ func ApplyTemplate(template interface{}, data TemplateData) ([]byte, error) {
 
 	switch t := template.(type) {
 	case map[string]interface{}:
-		walkMap(t, result)
+		walkMap(t, mapWriter(result))
 	}
 	return json.Marshal(result)
 }
 
-type valueWriter func(string, interface{})
+type valueWriter func(key string, value interface{})
 
-func walkMap(m map[string]interface{}, result map[string]interface{}) {
+func mapWriter(m map[string]interface{}) valueWriter {
+	return func(key string, value interface{}) {
+		m[key] = value
+	}
+}
+func sliceWriter(s *[]interface{}) valueWriter {
+	return func(k string, value interface{}) {
+		fmt.Printf("sliceWriter: %v , %v", k, value)
+		*s = append(*s, value)
+	}
+}
+
+func walkMap(m map[string]interface{}, result valueWriter) {
 	for k, v := range m {
-		switch i := v.(type) {
+		switch value := v.(type) {
 
 		case string:
-			result[k] = i
+			result(k, value)
 
 		case map[string]interface{}:
 			sub := make(map[string]interface{})
-			result[k] = sub
-			walkMap(i, sub)
+			result(k, sub)
+			walkMap(value, mapWriter(sub))
 
-		// case []interface{}:
-		// 	for _, x := range i {
-		// 		walkMap(x)
-		// 	}
+		case []interface{}:
+			var sub []interface{}
+			sw := sliceWriter(&sub)
+
+			msub := make(map[string]interface{})
+
+			for _, msub["_"] = range value {
+				walkMap(msub, sw)
+			}
+
+			result(k, sub)
 
 		default:
-			fmt.Printf("unknown: %s = %v\n", k, reflect.TypeOf(v))
-			result[k] = v
+			result(k, value)
+
 		}
 	}
 }

@@ -40,11 +40,11 @@ func Test_simple_json_structure_can_be_rendered(t *testing.T) {
 
 	assert.Equal(t, "ok", actual.AnObject.SubKey)
 
-	// if assert.Equal(t, 3, len(actual.AnArray)) {
-	// 	assert.Equal(t, 10, actual.AnArray[0])
-	// 	assert.Equal(t, 11, actual.AnArray[1])
-	// 	assert.Equal(t, 12, actual.AnArray[2])
-	// }
+	if assert.Equal(t, 3, len(actual.AnArray)) {
+		assert.Equal(t, 10, actual.AnArray[0])
+		assert.Equal(t, 11, actual.AnArray[1])
+		assert.Equal(t, 12, actual.AnArray[2])
+	}
 }
 
 func createRequestBody(t *testing.T, bodyText string) interface{} {
