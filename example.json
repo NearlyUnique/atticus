@@ -3,9 +3,12 @@
   "label":"examples",
   "match":{
     "method":"GET",
-    "URL":"/example/{id}"
+    "url":"/example/{id}"
   },
   "template":{
+    "header":{
+      "Content-Type":"application/json"
+    },
     "body":{
       "some-key":"literal-value",
       "another": 12,
