@@ -21,7 +21,7 @@ func Test_string_templates(t *testing.T) {
 	}
 	var actual struct{ Key string }
 
-	jsonBody, err := atticus.ApplyTemplate(c, &data)
+	jsonBody, err := atticus.ApplyBodyTemplate(c, &data)
 
 	assert.NoError(t, err)
 
@@ -40,7 +40,7 @@ func Test_simple_json_structure_can_be_rendered(t *testing.T) {
 		"an-array":[10,11,12]
 		}`)
 	data := atticus.TemplateData{}
-	jsonBody, err := atticus.ApplyTemplate(c, &data)
+	jsonBody, err := atticus.ApplyBodyTemplate(c, &data)
 
 	assert.NoError(t, err)
 

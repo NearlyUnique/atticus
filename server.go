@@ -1,15 +1,17 @@
 package atticus
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
-	"reflect"
-	"text/template"
+	"strings"
+	"sync"
+
+	"github.com/pkg/errors"
 
 	"github.com/gorilla/mux"
 )
@@ -17,25 +19,30 @@ import (
 type (
 	//Server for mocked responses
 	Server struct {
-		r *mux.Router
+		http    *http.Server
+		control *http.Server
+		mu      sync.Mutex
+		router  *mux.Router
+		canned  []Canned
 	}
-	// CannedResponse .
-	CannedResponse struct {
+	// ResponseTemplate .
+	ResponseTemplate struct {
 		Body       interface{}
 		Header     map[string]string
 		StatusCode int
 	}
-	// CannedRequest .
-	CannedRequest struct {
+	// RequestMatch .
+	RequestMatch struct {
 		URL    string
 		Method string
+		Header map[string]string
 	}
 	// Canned .
 	Canned struct {
 		Name     string
 		Label    string
-		Request  CannedRequest
-		Response CannedResponse
+		Match    RequestMatch
+		Template ResponseTemplate
 	}
 	// TemplateData based on request data
 	TemplateData struct {
@@ -49,97 +56,95 @@ type (
 )
 
 // New server configured to start
-func New() *Server {
-	return &Server{}
+func New(initial string) (*Server, error) {
+	var canned []Canned
+	if initial != "" {
+		f, err := ioutil.ReadFile(initial)
+		if err != nil {
+			return nil, err
+		}
+		err = json.Unmarshal(f, &canned)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	log.Printf("%d canned results configured", len(canned))
+
+	return &Server{
+		canned: canned,
+	}, nil
 }
 
 // Run the configured server
-func (s *Server) Run() error {
+func (s *Server) Run(ctrlListener net.Listener, runListener net.Listener) error {
 	log.Printf("listening ...")
 
-	var canned []Canned
-	f, err := ioutil.ReadFile("./canned.json")
-	if err != nil {
-		return err
-	}
-	err = json.Unmarshal(f, &canned)
-	if err != nil {
-		return err
-	}
-
 	root := mux.NewRouter()
-	for _, c := range canned {
-		r := root.NewRoute()
-		body, _ := json.Marshal(c.Response.Body)
-		code := c.Response.StatusCode
-		header := c.Response.Header
-		r.
-			Path(c.Request.URL).
-			Methods(c.Request.Method).
-			HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s.router = root
 
-				data := TemplateData{
-					Method: r.Method,
-					URL:    r.URL.String(),
-					Query:  copyMap(map[string][]string(r.URL.Query())),
-					Vars:   vars(r),
-					Header: copyMap(map[string][]string(r.Header)),
-				}
-
-				if r.Body != nil && r.ContentLength > 0 {
-					buf, err := ioutil.ReadAll(r.Body)
-					if err == nil {
-						err := json.Unmarshal(buf, &data.Body)
-						if err == nil {
-							log.Printf("Bad Template: %v", err)
-						}
-					}
-				}
-
-				for k, v := range header {
-					t, err := template.New("test").Parse(v)
-					if err != nil {
-						log.Printf("parse failed: %v", err)
-						break
-					}
-
-					buf := &bytes.Buffer{}
-					err = t.Execute(buf, data)
-					if err != nil {
-						log.Printf("execute failed: %v", err)
-						break
-					}
-					w.Header()[k] = []string{buf.String()}
-				}
-
-				w.WriteHeader(code)
-				if body != nil {
-
-					// t, err := template.New("test").Parse(string(body))
-					// if err != nil {
-					// 	log.Printf("parse failed: %v", err)
-					// }
-
-					// buf := &bytes.Buffer{}
-					// err = t.Execute(buf, data)
-					// if err != nil {
-					// 	log.Printf("execute failed: %v", err)
-					// }
-
-					// data has the data for this request
-
-					// w.Write(buf.Bytes())
-				}
-			})
+	for _, c := range s.canned {
+		s.addCanned(c)
 	}
-	s.r = root
 
-	return http.ListenAndServe(":10000", s)
+	s.http = &http.Server{Handler: s}
+	s.control = &http.Server{Handler: controlPlane(s)}
+
+	go func() {
+		err := s.control.Serve(ctrlListener)
+		if err != nil {
+			log.Printf("Control plane serve : %v", err)
+		}
+	}()
+
+	return s.http.Serve(runListener)
+}
+
+func (s *Server) addCanned(c Canned) error {
+	var valid []string
+	if c.Match.URL == "" {
+		valid = append(valid, "missing match URL")
+	}
+	if c.Match.URL == "" {
+		valid = append(valid, "missing match URL")
+	}
+
+	if len(valid) > 0 {
+		return errors.New(strings.Join(valid, ","))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	r := s.router.NewRoute()
+	r.Path(c.Match.URL)
+
+	if c.Match.Method != "" {
+		r.Methods(c.Match.Method)
+	}
+
+	r.HandlerFunc(runtimeHandler(
+		c.Template.Body,
+		c.Template.Header,
+		c.Template.StatusCode,
+	))
+
+	return nil
+}
+
+func (s *Server) Close() error {
+	ctx := context.Background()
+
+	if err := s.control.Shutdown(ctx); err != nil {
+		log.Printf("Control plane shutdown: %v", err)
+	}
+
+	return s.http.Shutdown(ctx)
 }
 
 func copyMap(src map[string][]string) map[string]interface{} {
 	hdr := make(map[string]interface{})
 	for k, v := range src {
+		k = strings.Replace(strings.ToLower(k), "-", "_", -1)
 		if len(v) == 1 {
 			hdr[k] = v[0]
 		} else {
@@ -151,8 +156,8 @@ func copyMap(src map[string][]string) map[string]interface{} {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var match mux.RouteMatch
-	if !s.r.Match(r, &match) {
-		w.WriteHeader(418)
+	if !s.router.Match(r, &match) {
+		w.WriteHeader(599)
 		fmt.Fprintf(w, "Atticus Failed to marshal response: %v", match.MatchErr)
 		return
 	}
@@ -163,76 +168,4 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func vars(r *http.Request) map[string]string {
 	return r.Context().Value("vars").(map[string]string)
-}
-
-// ApplyTemplate as configured using the data
-func ApplyTemplate(template interface{}, data *TemplateData) ([]byte, error) {
-	result := make(map[string]interface{})
-
-	switch t := template.(type) {
-	case map[string]interface{}:
-		walkMap(t, mapWriter(result), data)
-	}
-	fmt.Printf("%v\n", reflect.TypeOf(template))
-	return json.Marshal(result)
-}
-
-type valueWriter func(key string, value interface{})
-
-func mapWriter(m map[string]interface{}) valueWriter {
-	return func(key string, value interface{}) {
-		m[key] = value
-	}
-}
-func sliceWriter(s *[]interface{}) valueWriter {
-	return func(k string, value interface{}) {
-		fmt.Printf("sliceWriter: %v , %v", k, value)
-		*s = append(*s, value)
-	}
-}
-
-func walkMap(m map[string]interface{}, result valueWriter, data *TemplateData) {
-	for k, v := range m {
-		switch value := v.(type) {
-
-		case string:
-			result(k, applyTemplate(value, data))
-
-		case map[string]interface{}:
-			sub := make(map[string]interface{})
-			result(k, sub)
-			walkMap(value, mapWriter(sub), data)
-
-		case []interface{}:
-			var sub []interface{}
-			sw := sliceWriter(&sub)
-
-			msub := make(map[string]interface{})
-
-			for _, msub["_"] = range value {
-				walkMap(msub, sw, data)
-			}
-
-			result(k, sub)
-
-		default:
-			result(k, value)
-
-		}
-	}
-}
-
-func applyTemplate(input string, data *TemplateData) string {
-	t, err := template.New("test").Parse(input)
-	if err != nil {
-		return fmt.Sprintf("TEMPLATE_ERROR:%s => (%s)", input, err.Error())
-	}
-
-	buf := &bytes.Buffer{}
-	err = t.Execute(buf, data)
-	if err != nil {
-		return fmt.Sprintf("TEMPLATE_ERROR:%s => (%s)", input, err.Error())
-	}
-	s := buf.String()
-	return s
 }

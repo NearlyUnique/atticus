@@ -1,0 +1,15 @@
+{
+  "name":"basic example",
+  "label":"examples",
+  "match":{
+    "method":"GET",
+    "URL":"/example/{id}"
+  },
+  "template":{
+    "body":{
+      "some-key":"literal-value",
+      "another": 12,
+      "templated-value":"{{.Vars.id}} {{.Method}} {{.Header.user_agent}} {{.Header.customer_header}}"
+    }
+  }
+}

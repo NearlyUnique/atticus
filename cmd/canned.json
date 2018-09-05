@@ -1,24 +1,40 @@
 [
   {
-    "request":{
+    "name":"some mock",
+    "match":{
       "url": "/some-mock/{id}",
-      "method": "GET"
+      "method": "GET",
+      "header": {
+        "Authorization": "required-token"
+      }
     },
-    "response": {
+    "template": {
       "body": {
-        "some-key": "{{.vars.id}}",
+        "some-key": "{{.Vars.id}}",
         "with-sub": {
           "ok": true,
-          "hdr": "{{.header.user-agent}}"
+          "hdr": "{{.Header.user_agent}}"
         },
         "list":[1,2,3]
       },
       "header": {
-        "some-value": "{{.query.search}}",
+        "some-value": "{{.Query.search}}",
         "trace-id": "$echo$"
       },
       "statusCode": 200,
       "delay-ms": 0
+    }
+  },
+  {
+    "match":{
+      "method": "GET",
+      "url": "/"
+    },
+    "template": {
+      "header": {
+        "some-value": "hello"
+      },
+      "statusCode": 200
     }
   }
 ]
